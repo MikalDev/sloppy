@@ -356,6 +356,24 @@ class StableDiffusionService:
             traceback.print_exc()
             return False
     
+    def _reset_scheduler_state(self):
+        """Reset the scheduler state to prevent PNDM corruption after interrupted generations"""
+        try:
+            if self.pipeline and hasattr(self.pipeline, 'scheduler'):
+                # Reset scheduler's internal state that may be corrupted
+                scheduler = self.pipeline.scheduler
+                if hasattr(scheduler, 'timesteps'):
+                    scheduler.timesteps = None
+                if hasattr(scheduler, '_step_index'):
+                    scheduler._step_index = None
+                if hasattr(scheduler, 'ets'):
+                    scheduler.ets = []
+                if hasattr(scheduler, 'cur_sample'):
+                    scheduler.cur_sample = None
+                print("Scheduler state reset after error")
+        except Exception as reset_error:
+            print(f"Warning: Failed to reset scheduler state: {reset_error}")
+
     def generate_image(self, prompt, steps=20, width=512, height=512):
         """Generate image from text prompt with memory management"""
         if not self.model_loaded:
@@ -409,6 +427,11 @@ class StableDiffusionService:
             print(f"Generation failed: {error_msg}")
             traceback.print_exc()
             
+            # Reset scheduler state if corruption detected (PNDM list index error)
+            if "list index out of range" in error_msg and "scheduling" in error_msg.lower():
+                print("⚠️ Detected PNDM scheduler corruption - resetting scheduler state")
+                self._reset_scheduler_state()
+            
             # Clean up on error
             gc.collect()
             if self.device == "cuda":
@@ -419,6 +442,8 @@ class StableDiffusionService:
                 return None, f"Out of memory error. Try reducing image size or inference steps. Available: {self.get_memory_info()['available_gb']:.1f}GB"
             elif "cuda" in error_msg.lower():
                 return None, f"CUDA error: {error_msg}"
+            elif "list index out of range" in error_msg and "scheduling" in error_msg.lower():
+                return None, f"Scheduler corruption detected and reset. Please try again. Error: {error_msg}"
             else:
                 return None, f"Generation error: {error_msg}"
 
@@ -539,9 +564,17 @@ def health():
 def generate():
     """Generate image from text prompt"""
     try:
+        print(f"[REQUEST INFO]")
+        print(f"   Method: {request.method}")
+        print(f"   Headers: {dict(request.headers)}")
+        print(f"   Content-Type: {request.content_type}")
+        print(f"   User-Agent: {request.headers.get('User-Agent', 'None')}")
+        
         data = request.get_json()
         if not data:
             return jsonify({"success": False, "error": "No JSON data provided"}), 400
+        
+        print(f"   JSON Payload: {data}")
         
         prompt = data.get('prompt')
         if not prompt:
@@ -556,7 +589,10 @@ def generate():
         width = max(128, min(width, 1024))  # Limit width
         height = max(128, min(height, 1024))  # Limit height
         
-        print(f"Generating image for prompt: '{prompt}' with {steps} steps, {width}x{height}")
+        print(f"[GENERATION START]")
+        print(f"   Prompt: '{prompt}'")
+        print(f"   Settings: {steps} steps, {width}x{height}")
+        print(f"   Client: {request.headers.get('User-Agent', 'Unknown')[:50]}...")
         start_time = time.time()
         
         image, error_msg = sd_service.generate_image(prompt, steps, width, height)
