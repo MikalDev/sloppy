@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>AI Art Generator Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .container { max-width: 800px; margin: 0 auto; }
+        input, button { padding: 10px; margin: 5px; }
+        #prompt { width: 400px; }
+        #result { margin-top: 20px; }
+        img { max-width: 512px; border: 1px solid #ccc; }
+        .loading { color: #666; }
+        .error { color: red; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>AI Art Generator Test</h1>
+        
+        <div>
+            <input type="text" id="prompt" placeholder="Enter your prompt (e.g., 'a beautiful landscape')" value="a beautiful landscape">
+            <input type="number" id="seed" placeholder="Seed (optional)" value="42">
+            <button onclick="generateImage()">Generate Image</button>
+        </div>
+        
+        <div id="result"></div>
+    </div>
+
+    <script>
+        async function generateImage() {
+            const prompt = document.getElementById('prompt').value;
+            const seed = document.getElementById('seed').value || Math.floor(Math.random() * 1000000);
+            const resultDiv = document.getElementById('result');
+            
+            if (!prompt.trim()) {
+                alert('Please enter a prompt');
+                return;
+            }
+            
+            resultDiv.innerHTML = '<p class="loading">Generating image... This may take a moment.</p>';
+            
+            try {
+                const response = await fetch('http://localhost:8083/generate', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        prompt: prompt,
+                        seed: parseInt(seed),
+                        negative_prompt: ""
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    resultDiv.innerHTML = `
+                        <h3>Generated Image</h3>
+                        <p><strong>Prompt:</strong> "${data.prompt}"</p>
+                        <p><strong>Generation Time:</strong> ${data.generation_time} seconds</p>
+                        <img src="data:image/png;base64,${data.image}" alt="Generated image">
+                    `;
+                } else {
+                    resultDiv.innerHTML = `<p class="error">Generation failed: ${data.error}</p>`;
+                }
+                
+            } catch (error) {
+                console.error('Error:', error);
+                resultDiv.innerHTML = `<p class="error">Error: ${error.message}. Make sure the AI service is running on localhost:8081</p>`;
+            }
+        }
+        
+        // Allow Enter key to generate
+        document.getElementById('prompt').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                generateImage();
+            }
+        });
+    </script>
+</body>
+</html>
